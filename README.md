@@ -134,6 +134,8 @@ Se ejecutó `./mymaps &` y se leyó `/proc/PID/maps` con el PID guardado en `$!`
 | heap (`malloc`) | `0x558c2f3412a0` | `558c2f341000-558c2f462000 rw-p [heap]` |
 | variable local | `0x7ffed39d0b80` | `7ffed39b2000-7ffed39d7000 rw-p [stack]` |
 
+Cada línea de `maps` tiene el formato `inicio-fin permisos desplazamiento dispositivo inodo ruta`. Los permisos `r`, `w` y `x` indican lectura, escritura y ejecución, y la última letra es `p` (privada, copy-on-write) o `s` (compartida). Por eso el código del programa es `r-xp`, las constantes `r--p` y los datos `rw-p`. El heap y la pila no tienen archivo asociado (inodo 0): son memoria anónima que crece según se usa.
+
 Además aparecen las bibliotecas (`libc.so.6` con sus cuatro segmentos: solo lectura, ejecutable, solo lectura y datos), el cargador `ld-linux`, y las regiones especiales `[vvar]`, `[vdso]` y `[vsyscall]`. Las direcciones del ejecutable, el heap y la pila cambian en cada corrida por ASLR. La captura muestra `Stopped` al final: un proceso en segundo plano que intenta leer del terminal (`getchar`) recibe `SIGTTIN` y se detiene, pero sigue existiendo y su `maps` sigue siendo legible; después se terminó con `kill -9`.
 
 ## Checkpoint 2 — Clasificación de páginas con `smaps` y `pmap -x`
@@ -156,6 +158,8 @@ Capturas: `cp3_a_pagefault.png` (`./pagefault_demo`) y `cp3_b_time.png` (`/usr/b
 |---|---|---|---|---|
 | después de `malloc(100 MB)` | 105112 kB | 1860 kB | 91 | 0 |
 | después del `memset` | 105112 kB | 104260 kB | 25691 | 0 |
+
+Un **fallo menor** (minor) ocurre cuando la página no está mapeada en la tabla de páginas del proceso pero el kernel puede resolverla sin acceder al disco: asignar un marco libre y ponerlo en cero, o enlazar una página que ya está en memoria. Un **fallo mayor** (major) obliga a leer la página desde el disco (un archivo mapeado o el swap), por lo que cuesta miles de veces más. Aquí todos los fallos son menores porque la memoria es anónima y nunca se guardó en swap.
 
 `malloc` reserva espacio virtual pero no memoria física: VmSize sube de inmediato y VmRSS casi no se mueve. Al recorrer el bloque con `memset`, cada página de 4 KB que se toca por primera vez produce un fallo menor, y la diferencia de fallos es 25691 − 91 = 25600 = 100 MB / 4 KB. VmRSS sube ≈102400 kB, es decir, los mismos 100 MB. No hubo fallos mayores porque no se leyó nada del disco. `/usr/bin/time -v` confirma el orden de magnitud: 26031 fallos menores en total para todo el proceso, 0 mayores, y un tamaño residente máximo de ≈103956 kB.
 
